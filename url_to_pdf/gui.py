@@ -40,7 +40,6 @@ class _QueueWriter:
         while "\n" in self._buf:
             line, self._buf = self._buf.split("\n", 1)
             self._q.put(line)
-        # Also emit partial lines (e.g. progress \r updates)
         if self._buf:
             self._q.put("\r" + self._buf)
 
@@ -58,12 +57,13 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("url-to-pdf")
-        self.geometry("780x620")
-        self.minsize(680, 540)
+        self.geometry("800x680")
+        self.minsize(680, 580)
         self.resizable(True, True)
 
         self._log_q: queue.Queue = queue.Queue()
         self._running = False
+        self._estimate_done = False   # True once estimate has run
 
         self._build_ui()
         self._poll_log()
@@ -85,7 +85,7 @@ class App(ctk.CTk):
 
         # ---- Tab view ----
         self._tabs = ctk.CTkTabview(self, corner_radius=8)
-        self._tabs.pack(fill="both", expand=True, padx=14, pady=(8, 0))
+        self._tabs.pack(fill="both", expand=False, padx=14, pady=(8, 0))
 
         self._tabs.add("Crawl to PDF")
         self._tabs.add("Convert PDF → Markdown")
@@ -106,7 +106,6 @@ class App(ctk.CTk):
             font=ctk.CTkFont(family="Courier New", size=11),
             state="disabled",
             wrap="word",
-            height=160,
         )
         self._log_box.pack(fill="both", expand=True, padx=8, pady=(2, 8))
 
@@ -117,65 +116,108 @@ class App(ctk.CTk):
 
         row = 0
 
-        # URL
-        ctk.CTkLabel(parent, text="Starting URL:", anchor="w").grid(
-            row=row, column=0, padx=(8, 4), pady=6, sticky="w")
-        self._url_var = tk.StringVar()
-        ctk.CTkEntry(parent, textvariable=self._url_var,
-                     placeholder_text="https://example.com").grid(
-            row=row, column=1, padx=4, pady=6, sticky="ew")
+        # ── Step 1: URL + Estimate ────────────────────────────────────
+        step1 = ctk.CTkFrame(parent, corner_radius=6)
+        step1.grid(row=row, column=0, columnspan=2, padx=4, pady=(6, 4), sticky="ew")
+        step1.columnconfigure(1, weight=1)
         row += 1
 
+        ctk.CTkLabel(step1, text="Step 1 — Enter URL and estimate site size",
+                     font=ctk.CTkFont(weight="bold"), anchor="w").grid(
+            row=0, column=0, columnspan=3, padx=10, pady=(8, 4), sticky="w")
+
+        ctk.CTkLabel(step1, text="Starting URL:", anchor="w").grid(
+            row=1, column=0, padx=(10, 4), pady=6, sticky="w")
+        self._url_var = tk.StringVar()
+        ctk.CTkEntry(step1, textvariable=self._url_var,
+                     placeholder_text="https://example.com").grid(
+            row=1, column=1, padx=4, pady=6, sticky="ew")
+
+        self._estimate_btn = ctk.CTkButton(
+            step1, text="Estimate site size", width=160,
+            command=self._run_estimate,
+        )
+        self._estimate_btn.grid(row=1, column=2, padx=(4, 10), pady=6)
+
+        # Estimate result label
+        self._estimate_label = ctk.CTkLabel(
+            step1, text="", anchor="w",
+            font=ctk.CTkFont(size=12),
+            text_color=("gray40", "gray70"),
+        )
+        self._estimate_label.grid(row=2, column=0, columnspan=3,
+                                   padx=10, pady=(0, 8), sticky="w")
+
+        # ── Step 2: Depth + options (locked until estimate done) ──────
+        self._step2_frame = ctk.CTkFrame(parent, corner_radius=6)
+        self._step2_frame.grid(row=row, column=0, columnspan=2, padx=4, pady=4, sticky="ew")
+        self._step2_frame.columnconfigure(1, weight=1)
+        row += 1
+
+        ctk.CTkLabel(self._step2_frame,
+                     text="Step 2 — Choose crawl depth and options",
+                     font=ctk.CTkFont(weight="bold"), anchor="w").grid(
+            row=0, column=0, columnspan=2, padx=10, pady=(8, 4), sticky="w")
+
         # Depth
-        ctk.CTkLabel(parent, text="Max depth:", anchor="w").grid(
-            row=row, column=0, padx=(8, 4), pady=6, sticky="w")
-        depth_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        depth_frame.grid(row=row, column=1, padx=4, pady=6, sticky="w")
+        ctk.CTkLabel(self._step2_frame, text="Max depth:", anchor="w").grid(
+            row=1, column=0, padx=(10, 4), pady=6, sticky="w")
+        depth_frame = ctk.CTkFrame(self._step2_frame, fg_color="transparent")
+        depth_frame.grid(row=1, column=1, padx=4, pady=6, sticky="w")
+
         self._depth_var = tk.StringVar(value="2")
-        ctk.CTkOptionMenu(
+        self._depth_menu = ctk.CTkOptionMenu(
             depth_frame,
             values=["0", "1", "2", "3", "4", "5", "Unlimited"],
             variable=self._depth_var,
-            width=110,
-        ).pack(side="left")
-        self._no_estimate_var = tk.BooleanVar(value=False)
-        ctk.CTkCheckBox(depth_frame, text="Skip site estimate",
-                        variable=self._no_estimate_var).pack(side="left", padx=16)
-        row += 1
+            width=120,
+            state="disabled",
+        )
+        self._depth_menu.pack(side="left")
+
+        self._images_var = tk.BooleanVar(value=False)
+        self._images_cb = ctk.CTkCheckBox(
+            depth_frame, text="Include images",
+            variable=self._images_var, state="disabled",
+        )
+        self._images_cb.pack(side="left", padx=16)
 
         # Delay
-        ctk.CTkLabel(parent, text="Request delay (s):", anchor="w").grid(
-            row=row, column=0, padx=(8, 4), pady=6, sticky="w")
-        delay_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        delay_frame.grid(row=row, column=1, padx=4, pady=6, sticky="w")
+        ctk.CTkLabel(self._step2_frame, text="Request delay (s):", anchor="w").grid(
+            row=2, column=0, padx=(10, 4), pady=6, sticky="w")
         self._delay_var = tk.StringVar(value="0.5")
-        ctk.CTkEntry(delay_frame, textvariable=self._delay_var, width=80).pack(side="left")
-        self._images_var = tk.BooleanVar(value=False)
-        ctk.CTkCheckBox(delay_frame, text="Include images",
-                        variable=self._images_var).pack(side="left", padx=16)
-        row += 1
+        self._delay_entry = ctk.CTkEntry(
+            self._step2_frame, textvariable=self._delay_var,
+            width=80, state="disabled",
+        )
+        self._delay_entry.grid(row=2, column=1, padx=4, pady=6, sticky="w")
 
         # Output path
-        ctk.CTkLabel(parent, text="Output PDF:", anchor="w").grid(
-            row=row, column=0, padx=(8, 4), pady=6, sticky="w")
-        out_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        out_frame.grid(row=row, column=1, padx=4, pady=6, sticky="ew")
+        ctk.CTkLabel(self._step2_frame, text="Output PDF:", anchor="w").grid(
+            row=3, column=0, padx=(10, 4), pady=6, sticky="w")
+        out_frame = ctk.CTkFrame(self._step2_frame, fg_color="transparent")
+        out_frame.grid(row=3, column=1, padx=4, pady=6, sticky="ew")
         out_frame.columnconfigure(0, weight=1)
-        self._crawl_output_var = tk.StringVar(value="")
-        ctk.CTkEntry(out_frame, textvariable=self._crawl_output_var,
-                     placeholder_text="(auto-generated from URL)").grid(
-            row=0, column=0, sticky="ew", padx=(0, 4))
-        ctk.CTkButton(out_frame, text="Browse…", width=80,
-                      command=self._browse_pdf_save).grid(row=0, column=1)
-        row += 1
+        self._crawl_output_var = tk.StringVar()
+        self._crawl_output_entry = ctk.CTkEntry(
+            out_frame, textvariable=self._crawl_output_var,
+            placeholder_text="(auto-generated from URL)", state="disabled",
+        )
+        self._crawl_output_entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self._browse_pdf_btn = ctk.CTkButton(
+            out_frame, text="Browse…", width=80,
+            command=self._browse_pdf_save, state="disabled",
+        )
+        self._browse_pdf_btn.grid(row=0, column=1)
 
-        # Start button
+        # ── Step 3: Start crawl ───────────────────────────────────────
         self._crawl_btn = ctk.CTkButton(
             parent, text="▶  Start Crawl", width=200,
             font=ctk.CTkFont(size=14, weight="bold"),
             command=self._start_crawl,
+            state="disabled",
         )
-        self._crawl_btn.grid(row=row, column=0, columnspan=2, pady=14)
+        self._crawl_btn.grid(row=row, column=0, columnspan=2, pady=12)
 
     # ---- Convert tab ----
 
@@ -184,7 +226,6 @@ class App(ctk.CTk):
 
         row = 0
 
-        # Input PDF
         ctk.CTkLabel(parent, text="Input PDF:", anchor="w").grid(
             row=row, column=0, padx=(8, 4), pady=6, sticky="w")
         in_frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -198,7 +239,6 @@ class App(ctk.CTk):
                       command=self._browse_pdf_open).grid(row=0, column=1)
         row += 1
 
-        # Output Markdown
         ctk.CTkLabel(parent, text="Output Markdown:", anchor="w").grid(
             row=row, column=0, padx=(8, 4), pady=6, sticky="w")
         out_frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -212,7 +252,6 @@ class App(ctk.CTk):
                       command=self._browse_md_save).grid(row=0, column=1)
         row += 1
 
-        # Clean option
         ctk.CTkLabel(parent, text="Options:", anchor="w").grid(
             row=row, column=0, padx=(8, 4), pady=6, sticky="w")
         self._clean_var = tk.BooleanVar(value=False)
@@ -223,7 +262,6 @@ class App(ctk.CTk):
         ).grid(row=row, column=1, padx=4, pady=6, sticky="w")
         row += 1
 
-        # Convert button
         self._convert_btn = ctk.CTkButton(
             parent, text="▶  Convert to Markdown", width=200,
             font=ctk.CTkFont(size=14, weight="bold"),
@@ -268,7 +306,6 @@ class App(ctk.CTk):
     def _log(self, text: str):
         self._log_box.configure(state="normal")
         if text.startswith("\r"):
-            # Overwrite last line (progress indicator)
             self._log_box.delete("end-2l", "end-1l")
             self._log_box.insert("end", text.lstrip("\r") + "\n")
         else:
@@ -277,7 +314,6 @@ class App(ctk.CTk):
         self._log_box.configure(state="disabled")
 
     def _poll_log(self):
-        """Drain the log queue into the text box (runs on the UI thread)."""
         try:
             while True:
                 line = self._log_q.get_nowait()
@@ -290,18 +326,25 @@ class App(ctk.CTk):
     # Background task runner
     # ------------------------------------------------------------------
 
-    def _run_in_thread(self, fn: Callable, btn: ctk.CTkButton, btn_label: str):
+    def _run_in_thread(
+        self,
+        fn: Callable,
+        btn: ctk.CTkButton,
+        btn_label: str,
+        clear_log: bool = True,
+        on_done: Callable | None = None,
+    ):
         if self._running:
             self._log("⚠  Another task is already running.")
             return
         self._running = True
         btn.configure(state="disabled", text="Running…")
-        self._log_box.configure(state="normal")
-        self._log_box.delete("1.0", "end")
-        self._log_box.configure(state="disabled")
+        if clear_log:
+            self._log_box.configure(state="normal")
+            self._log_box.delete("1.0", "end")
+            self._log_box.configure(state="disabled")
 
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
+        old_stdout, old_stderr = sys.stdout, sys.stderr
         writer = _QueueWriter(self._log_q)
         sys.stdout = writer
         sys.stderr = writer
@@ -318,14 +361,16 @@ class App(ctk.CTk):
                 sys.stderr = old_stderr
                 self._running = False
                 self.after(0, lambda: btn.configure(state="normal", text=btn_label))
+                if on_done:
+                    self.after(0, on_done)
 
         threading.Thread(target=_target, daemon=True).start()
 
     # ------------------------------------------------------------------
-    # Crawl action
+    # Step 1: Run estimate
     # ------------------------------------------------------------------
 
-    def _start_crawl(self):
+    def _run_estimate(self):
         url = self._url_var.get().strip()
         if not url:
             self._log("⚠  Please enter a starting URL.")
@@ -333,6 +378,55 @@ class App(ctk.CTk):
         if not url.startswith("http"):
             url = "https://" + url
             self._url_var.set(url)
+
+        # Reset state
+        self._estimate_done = False
+        self._estimate_label.configure(text="Scanning…", text_color=("gray40", "gray70"))
+        self._set_step2_state("disabled")
+
+        def _run():
+            from .crawler import estimate_link_count
+            from .utils import normalise_url
+            start_url = normalise_url(url)
+            print(f"Scanning {start_url} …")
+            count = estimate_link_count(start_url, max_depth=2)
+            # Pass count back to UI thread via a captured variable
+            self._last_estimate = count
+
+        def _after():
+            count = getattr(self, "_last_estimate", 0)
+            self._estimate_label.configure(
+                text=f"~{count} pages reachable within 2 levels of the start URL.",
+                text_color=("gray20", "gray90"),
+            )
+            self._estimate_done = True
+            self._set_step2_state("normal")
+
+        self._run_in_thread(
+            _run,
+            self._estimate_btn,
+            "Estimate site size",
+            clear_log=True,
+            on_done=_after,
+        )
+
+    def _set_step2_state(self, state: str):
+        """Enable or disable all Step 2 controls."""
+        self._depth_menu.configure(state=state)
+        self._images_cb.configure(state=state)
+        self._delay_entry.configure(state=state)
+        self._crawl_output_entry.configure(state=state)
+        self._browse_pdf_btn.configure(state=state)
+        self._crawl_btn.configure(state=state)
+
+    # ------------------------------------------------------------------
+    # Step 3: Start crawl
+    # ------------------------------------------------------------------
+
+    def _start_crawl(self):
+        url = self._url_var.get().strip()
+        if not url.startswith("http"):
+            url = "https://" + url
 
         depth_str = self._depth_var.get()
         depth_arg = None if depth_str == "Unlimited" else int(depth_str)
@@ -343,25 +437,17 @@ class App(ctk.CTk):
             delay = 0.5
 
         output = self._crawl_output_var.get().strip() or None
-        no_estimate = self._no_estimate_var.get()
         images = self._images_var.get()
 
         def _run():
-            from .crawler import crawl, estimate_link_count
+            from .crawler import crawl
             from .pdf_builder import build_pdf
             from .utils import get_domain, url_to_filename, normalise_url
 
             start_url = normalise_url(url)
             domain = get_domain(start_url)
-            print(f"\nurl-to-pdf  |  domain: {domain}")
-            print("-" * 50)
-
-            if not no_estimate:
-                print("Estimating site size (shallow scan, depth 2)…")
-                estimate_link_count(start_url, max_depth=2)
-                print("  Scan complete.")
-
             depth_label = "unlimited" if depth_arg is None else depth_arg
+            print(f"url-to-pdf  |  domain: {domain}")
             print(f"Crawl depth: {depth_label}")
             print(f"\nCrawling {start_url} …")
 
