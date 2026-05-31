@@ -36,6 +36,7 @@ def clean_for_llm(markdown: str) -> str:
     lines = _remove_google_translate_blocks(lines)
     lines = _remove_url_clusters(lines)
     lines = _remove_language_selector_blocks(lines)
+    lines = _remove_site_navigation_lines(lines)
     lines = _remove_repeated_running_headers(lines)
     lines = _remove_link_dump_sections(lines)
     lines = _remove_duplicate_headings(lines)
@@ -95,6 +96,26 @@ _BOILERPLATE_RE = re.compile(
     r"|"
     r"^Choose your product:\s*$"
     r"|"
+    r"^Horizzon Help\s*$"
+    r"|"
+    r"^Unify Help\s*$"
+    r"|"
+    r"^Bizzdesign Knowledge Base\s*$"
+    r"|"
+    r"^Admin login\s*$"
+    r"|"
+    r"^Hopex Community\s*$"
+    r"|"
+    r"^Search entire portal\s*$"
+    r"|"
+    r"^Alfabet Help\s*$"
+    r"|"
+    r"^Knowledge base\s*$"
+    r"|"
+    r"^Horizzon help\s*$"
+    r"|"
+    r"^Unify help\s*$"
+    r"|"
     r"^\| \|",                         # table-cell artefacts (even mid-line)
     re.IGNORECASE,
 )
@@ -111,7 +132,9 @@ _JUNK_SUBSTRING_RE = re.compile(
     r"|"
     r"Your feedback will be used to help improve Google Translate"
     r"|"
-    r"^\s*Articles\s+Chapter\s+\d+.*\d+\s*$",   # leaked PDF TOC refs
+    r"^\s*Articles\s+Chapter\s+\d+"              # leaked PDF running headers/TOC refs
+    r"|"
+    r"^Articles\s*$",                            # standalone "Articles" header
     re.IGNORECASE,
 )
 
@@ -239,6 +262,64 @@ def _remove_google_translate_blocks(lines: list[str]) -> list[str]:
             if cleaned:
                 result.append(cleaned)
             # else: nothing left — drop the line
+            continue
+        result.append(line)
+    return result
+
+
+def _remove_site_navigation_lines(lines: list[str]) -> list[str]:
+    """Remove lines that are site-wide navigation boilerplate.
+
+    Handles both:
+    - Standalone lines ("Horizzon Help", "Admin login", etc.)
+    - Merged lines where the PDF renderer joined several nav items onto one
+      long line (the common case after pdf_converter.py's _join_lines pass).
+    """
+    # Standalone nav anchor texts
+    _NAV_TEXTS = frozenset([
+        "horizzon help", "unify help", "bizzdesign knowledge base",
+        "admin login", "hopex community", "search entire portal",
+        "alfabet help", "knowledge base", "horizzon help",
+        "bizzdesign support", "analytics and publishing",
+        "collaboration", "data integration", "governance",
+        "customization", "management and administration",
+    ])
+
+    # Nav URL path regex (standalone lines)
+    _NAV_URL_RE = re.compile(
+        r"^https?://help\.bizzdesign\.com/"
+        r"(articles/alfabet-releases|articles/horizzon-help|"
+        r"articles/knowledge-base|articles/unify-help|"
+        r"login[/?]|search[/?]|forgot-password[/?]|home[/?])?$",
+        re.IGNORECASE,
+    )
+
+    # Fingerprint: a line is a merged nav block if it contains 3+ of these
+    _NAV_FINGERPRINTS = [
+        "horizzon help", "unify help", "bizzdesign knowledge base",
+        "admin login", "hopex community", "search entire portal",
+    ]
+
+    def _is_nav_dump(text: str) -> bool:
+        """True if the line is predominantly navigation content."""
+        lower = text.lower()
+        hits = sum(1 for fp in _NAV_FINGERPRINTS if fp in lower)
+        return hits >= 2
+
+    result: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            result.append(line)
+            continue
+        # Standalone nav anchor text
+        if stripped.lower() in _NAV_TEXTS:
+            continue
+        # Standalone nav URL
+        if _NAV_URL_RE.match(stripped):
+            continue
+        # Merged nav block (PDF-renderer joined multiple nav items)
+        if _is_nav_dump(stripped):
             continue
         result.append(line)
     return result

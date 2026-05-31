@@ -54,6 +54,50 @@ class Page:
 
 
 # ---------------------------------------------------------------------------
+# Site-wide navigation link filtering
+# ---------------------------------------------------------------------------
+
+# URL path suffixes that are site-wide navigation, not content links.
+# Matching is done against the path component of crawled links.
+_NAV_PATHS: frozenset[str] = frozenset([
+    "/",
+    "/articles/",
+    "/articles/alfabet-releases",
+    "/articles/horizzon-help",
+    "/articles/knowledge-base",
+    "/articles/unify-help",
+    "/login/",
+    "/search/",
+    "/forgot-password/",
+    "/home/",
+])
+
+# Anchor texts that indicate site-wide navigation rather than content links.
+_NAV_ANCHOR_TEXTS: frozenset[str] = frozenset([
+    "horizzon help", "unify help", "bizzdesign knowledge base",
+    "admin login", "hopex community", "search entire portal",
+    "alfabet help", "knowledge base", "horizzon help",
+    "bizzdesign support", "documentation", "releases",
+    "contact support", "training courses",
+])
+
+
+def _is_nav_link(url: str, anchor_text: str) -> bool:
+    """Return True if this link is site-wide navigation rather than content."""
+    from urllib.parse import urlparse
+    path = urlparse(url).path.rstrip("/") + "/"
+    # Match known navigation paths exactly
+    for nav in _NAV_PATHS:
+        nav_norm = nav.rstrip("/") + "/"
+        if path == nav_norm:
+            return True
+    # Match by anchor text (case-insensitive)
+    if anchor_text.strip().lower() in _NAV_ANCHOR_TEXTS:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Frame filtering
 # ---------------------------------------------------------------------------
 
@@ -243,6 +287,9 @@ def _extract_links(html: str, base_url: str, base_domain: str) -> list[tuple[str
             display = href          # URL was explicitly shown or no text
         else:
             display = anchor_text
+        # Skip site-wide navigation links
+        if _is_nav_link(href, display):
+            continue
         links.append((href, display))
     return links
 
