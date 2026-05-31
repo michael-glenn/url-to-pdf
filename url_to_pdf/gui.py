@@ -233,6 +233,7 @@ class App(ctk.CTk):
         in_frame.grid(row=row, column=1, padx=4, pady=6, sticky="ew")
         in_frame.columnconfigure(0, weight=1)
         self._pdf_input_var = tk.StringVar()
+        self._pdf_input_var.trace_add("write", self._on_pdf_input_changed)
         ctk.CTkEntry(in_frame, textvariable=self._pdf_input_var,
                      placeholder_text="Select a PDF file…").grid(
             row=0, column=0, sticky="ew", padx=(0, 4))
@@ -387,6 +388,20 @@ class App(ctk.CTk):
         current = self._crawl_output_var.get()
         if not current or current.endswith(".pdf") and "/" not in current and "\\" not in current:
             self._crawl_output_var.set(suggested)
+
+    def _on_pdf_input_changed(self, *_):
+        from pathlib import Path
+        pdf_path = self._pdf_input_var.get().strip()
+        if not pdf_path:
+            self._md_output_var.set("")
+            return
+        try:
+            suggested = str(Path(pdf_path).with_suffix(".md"))
+        except Exception:
+            return
+        current = self._md_output_var.get()
+        if not current or current.endswith(".md") and current == str(Path(current)):
+            self._md_output_var.set(suggested)
 
     # ------------------------------------------------------------------
     # Step 1: Run estimate
