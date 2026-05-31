@@ -63,6 +63,12 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Skip the shallow link-count estimate",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="When used with --to-md: strip TOC noise, page markers, boilerplate "
+             "and reflow paragraphs for optimal LLM ingestion",
+    )
 
     args = parser.parse_args(argv)
 
@@ -71,7 +77,7 @@ def main(argv: list[str] | None = None) -> None:
     # ------------------------------------------------------------------
     if args.to_md:
         from .pdf_converter import pdf_to_markdown
-        pdf_to_markdown(args.to_md, output_path=args.output)
+        pdf_to_markdown(args.to_md, output_path=args.output, clean=args.clean)
         return
 
     # ------------------------------------------------------------------

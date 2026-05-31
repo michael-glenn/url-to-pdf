@@ -7,8 +7,15 @@ import sys
 from pathlib import Path
 
 
-def pdf_to_markdown(input_path: str, output_path: str | None = None) -> str:
+def pdf_to_markdown(
+    input_path: str,
+    output_path: str | None = None,
+    clean: bool = False,
+) -> str:
     """Read *input_path* PDF and write Markdown to *output_path*.
+
+    If *clean* is True, run an LLM-optimisation pass before writing
+    (strips TOC noise, dot leaders, page markers, boilerplate, etc.).
 
     Returns the output file path used.
     """
@@ -85,6 +92,11 @@ def pdf_to_markdown(input_path: str, output_path: str | None = None) -> str:
 
     markdown = "\n\n".join(md_parts)
     markdown = _clean_markdown(markdown)
+
+    if clean:
+        from .pdf_cleaner import clean_for_llm
+        print("Cleaning for LLM use...")
+        markdown = clean_for_llm(markdown)
 
     dest.write_text(markdown, encoding="utf-8")
     print(f"Done — {page_count} page(s) converted.")
