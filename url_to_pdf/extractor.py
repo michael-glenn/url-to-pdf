@@ -6,11 +6,30 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+import subprocess
+import sys
+
 import trafilatura
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, Page as PWPage, Browser, Frame
 
 from .utils import normalise_url, is_ad_url, same_domain, is_ad_class
+
+
+def _ensure_browser_installed() -> None:
+    """Install Playwright's Chromium browser if it isn't already present."""
+    try:
+        from playwright.sync_api import sync_playwright
+        pw = sync_playwright().start()
+        pw.chromium.launch(headless=True).close()
+        pw.stop()
+    except Exception:
+        print("Playwright browser not found — installing Chromium (one-time setup)...")
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            check=True,
+        )
+        print("Chromium installed successfully.\n")
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -35,6 +54,7 @@ class BrowserSession:
     """Wraps a Playwright browser for re-use across many fetches."""
 
     def __init__(self, timeout: float = 20.0):
+        _ensure_browser_installed()
         self._pw = sync_playwright().start()
         self._browser: Browser = self._pw.chromium.launch(headless=True)
         self._context = self._browser.new_context(
