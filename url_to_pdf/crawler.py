@@ -30,25 +30,31 @@ def estimate_link_count(start_url: str, max_depth: int = 2) -> int:
         while queue:
             url, depth = queue.popleft()
             count += 1
+            print(
+                f"\r  Scanning depth {depth:2d} | pages found: {count:4d} | queue: {len(queue):4d}  ",
+                end="",
+                flush=True,
+            )
             if depth >= max_depth:
                 continue
             frame_htmls = session.get_page_data(url)
             if not frame_htmls:
                 continue
             for html in frame_htmls:
-              soup = BeautifulSoup(html, "lxml")
-              for a in soup.find_all("a", href=True):
-                href = normalise_url(a["href"], base=url)
-                if not href.startswith("http"):
-                    continue
-                if is_ad_url(href):
-                    continue
-                if not same_domain(href, domain):
-                    continue
-                if href not in visited:
-                    visited.add(href)
-                    queue.append((href, depth + 1))
+                soup = BeautifulSoup(html, "lxml")
+                for a in soup.find_all("a", href=True):
+                    href = normalise_url(a["href"], base=url)
+                    if not href.startswith("http"):
+                        continue
+                    if is_ad_url(href):
+                        continue
+                    if not same_domain(href, domain):
+                        continue
+                    if href not in visited:
+                        visited.add(href)
+                        queue.append((href, depth + 1))
     finally:
+        print()  # newline after progress
         session.close()
 
     return count
