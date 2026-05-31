@@ -13,13 +13,31 @@ from .utils import get_domain, url_to_filename, normalise_url
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="url-to-pdf",
-        description="Crawl a website and generate a book-like PDF.",
+        description=(
+            "Crawl a website and generate a book-like PDF,\n"
+            "or convert an existing PDF to Markdown."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("url", help="Starting URL to crawl")
+
+    # ---- Mutually exclusive modes ----------------------------------------
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--to-md",
+        metavar="PDF_FILE",
+        help="Convert an existing PDF to a Markdown (.md) file and exit",
+    )
+
+    # ---- Crawl arguments (used when not in --to-md mode) -----------------
+    parser.add_argument(
+        "url",
+        nargs="?",
+        help="Starting URL to crawl (required unless --to-md is used)",
+    )
     parser.add_argument(
         "-o", "--output",
         default=None,
-        help="Output PDF path (default: auto-generated from URL)",
+        help="Output file path (PDF when crawling; .md when using --to-md)",
     )
     parser.add_argument(
         "-d", "--depth",
@@ -48,9 +66,23 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
 
+    # ------------------------------------------------------------------
+    # Mode: PDF → Markdown conversion
+    # ------------------------------------------------------------------
+    if args.to_md:
+        from .pdf_converter import pdf_to_markdown
+        pdf_to_markdown(args.to_md, output_path=args.output)
+        return
+
+    # ------------------------------------------------------------------
+    # Mode: URL → PDF crawl
+    # ------------------------------------------------------------------
+    if not args.url:
+        parser.error("a URL is required (or use --to-md PDF_FILE to convert a PDF)")
+
     start_url = normalise_url(args.url)
     if not start_url.startswith("http"):
-        print(f"Error: URL must start with http:// or https://", file=sys.stderr)
+        print("Error: URL must start with http:// or https://", file=sys.stderr)
         sys.exit(1)
 
     domain = get_domain(start_url)
@@ -62,10 +94,8 @@ def main(argv: list[str] | None = None) -> None:
     # ------------------------------------------------------------------
     if not args.no_estimate:
         print("Estimating site size (shallow scan, depth 2)...")
-        estimate = estimate_link_count(start_url, max_depth=2)
-        print(f"  ~{estimate} pages reachable within 2 levels of the start URL.")
-    else:
-        estimate = None
+        estimate_link_count(start_url, max_depth=2)
+        print(f"  Scan complete.")
 
     # ------------------------------------------------------------------
     # Depth selection
