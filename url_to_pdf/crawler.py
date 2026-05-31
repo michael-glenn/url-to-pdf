@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 from collections import deque
 from typing import Optional
 
-import httpx
+from bs4 import BeautifulSoup
 
-from .extractor import Page, fetch_and_extract, _make_client
+from .extractor import Page, fetch_and_extract, BrowserSession
 from .utils import get_domain, normalise_url, is_ad_url, same_domain
 
 
@@ -18,13 +17,13 @@ from .utils import get_domain, normalise_url, is_ad_url, same_domain
 
 
 def estimate_link_count(start_url: str, max_depth: int = 2) -> int:
-    """Quick BFS to estimate total reachable pages (no content extraction)."""
+    """Quick BFS to estimate total reachable pages (JS-rendered)."""
     domain = get_domain(start_url)
     visited: set[str] = set()
     queue: deque[tuple[str, int]] = deque([(start_url, 0)])
     visited.add(start_url)
 
-    client = _make_client(timeout=10.0)
+    session = BrowserSession(timeout=15.0)
     count = 0
 
     try:
@@ -33,26 +32,24 @@ def estimate_link_count(start_url: str, max_depth: int = 2) -> int:
             count += 1
             if depth >= max_depth:
                 continue
-            try:
-                resp = client.get(url, follow_redirects=True)
-                resp.raise_for_status()
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(resp.text, "lxml")
-                for a in soup.find_all("a", href=True):
-                    href = normalise_url(a["href"], base=url)
-                    if not href.startswith("http"):
-                        continue
-                    if is_ad_url(href):
-                        continue
-                    if not same_domain(href, domain):
-                        continue
-                    if href not in visited:
-                        visited.add(href)
-                        queue.append((href, depth + 1))
-            except Exception:
+            frame_htmls = session.get_page_data(url)
+            if not frame_htmls:
                 continue
+            for html in frame_htmls:
+              soup = BeautifulSoup(html, "lxml")
+              for a in soup.find_all("a", href=True):
+                href = normalise_url(a["href"], base=url)
+                if not href.startswith("http"):
+                    continue
+                if is_ad_url(href):
+                    continue
+                if not same_domain(href, domain):
+                    continue
+                if href not in visited:
+                    visited.add(href)
+                    queue.append((href, depth + 1))
     finally:
-        client.close()
+        session.close()
 
     return count
 
@@ -78,13 +75,12 @@ def crawl(
     visited.add(start_url)
     pages: list[Page] = []
 
-    client = _make_client()
+    session = BrowserSession()
 
     try:
         while queue:
             url, depth = queue.popleft()
 
-            # Progress indicator
             print(
                 f"\r  Crawling depth {depth:2d} | pages found: {len(pages):4d} | queue: {len(queue):4d}  ",
                 end="",
@@ -93,7 +89,7 @@ def crawl(
 
             page = fetch_and_extract(
                 url,
-                client=client,
+                session=session,
                 base_domain=domain,
                 include_images=include_images,
                 delay=delay,
@@ -111,7 +107,7 @@ def crawl(
                     visited.add(child_url)
                     queue.append((child_url, depth + 1))
     finally:
-        client.close()
+        session.close()
         print()  # newline after progress
 
     return pages
