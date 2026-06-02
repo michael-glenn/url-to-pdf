@@ -235,8 +235,8 @@ def write_markdown_dir(
     written: dict[str, str] = {}
 
     # Write group files
-    for key, group_pages in groups.items():
-        content = _render_group(key, group_pages, start_url)
+    for key, page_list in groups.items():
+        content = _render_group(key, page_list, start_url)
         path = os.path.join(output_dir, filenames[key])
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
