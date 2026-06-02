@@ -100,6 +100,12 @@ def main(argv: list[str] | None = None) -> None:
              "Produces one .md per topic section plus an index.md.",
     )
     parser.add_argument(
+        "--single",
+        action="store_true",
+        help="When used with --md-dir: write all pages to a single .md file "
+             "instead of topic-grouped files. Output path set with -o.",
+    )
+    parser.add_argument(
         "--group-depth",
         type=int,
         default=1,
@@ -168,10 +174,17 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(1)
         print(f"  Done — {len(pages)} page(s) crawled.")
 
-        print(f"\nWriting Markdown files → {output_dir}/")
-        from .md_writer import write_markdown_dir
-        written = write_markdown_dir(pages, start_url=start_url, output_dir=output_dir)
-        print(f"  {len(written)} section file(s) + index.md written.")
+        if getattr(args, "single", False):
+            # Single-file mode: --md-dir used with --single flag
+            out_file = args.output or (url_to_filename(start_url) + ".md")
+            print(f"\nWriting Markdown → {out_file}")
+            from .md_writer import write_single_markdown
+            write_single_markdown(pages, start_url=start_url, output_path=out_file)
+        else:
+            print(f"\nWriting Markdown files → {output_dir}/")
+            from .md_writer import write_markdown_dir
+            written = write_markdown_dir(pages, start_url=start_url, output_dir=output_dir)
+            print(f"  {len(written)} section file(s) + index.md written.")
         print("Complete.")
         return
 

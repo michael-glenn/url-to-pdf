@@ -205,6 +205,38 @@ def _render_index(
 # ---------------------------------------------------------------------------
 
 
+def write_single_markdown(
+    pages: list[Page],
+    start_url: str,
+    output_path: str,
+) -> str:
+    """Write all crawled pages to a single Markdown file.
+
+    Pages are rendered in crawl order (BFS, shallower first), separated by
+    horizontal rules.  Returns the output path written.
+    """
+    from urllib.parse import urlparse
+    domain = urlparse(start_url).netloc
+
+    header = [
+        f"# {domain}",
+        "",
+        f"*Crawled from: {start_url} — {len(pages)} page(s)*",
+        "",
+        "---",
+        "",
+    ]
+
+    body = "\n\n---\n\n".join(_render_page(p) for p in pages)
+    content = "\n".join(header) + "\n" + body
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    print(f"  Written {len(pages)} page(s) → {output_path}")
+    return output_path
+
+
 def write_markdown_dir(
     pages: list[Page],
     start_url: str,

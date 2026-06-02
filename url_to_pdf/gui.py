@@ -268,7 +268,7 @@ class App(ctk.CTk):
         self._md_step2.columnconfigure(1, weight=1)
         row += 1
 
-        ctk.CTkLabel(self._md_step2, text="Step 2 — Choose depth and output folder",
+        ctk.CTkLabel(self._md_step2, text="Step 2 — Choose depth and output",
                      font=ctk.CTkFont(weight="bold"), anchor="w").grid(
             row=0, column=0, columnspan=2, padx=10, pady=(8, 4), sticky="w")
 
@@ -284,10 +284,27 @@ class App(ctk.CTk):
         )
         self._md_depth_menu.grid(row=1, column=1, padx=4, pady=6, sticky="w")
 
-        ctk.CTkLabel(self._md_step2, text="Output folder:", anchor="w").grid(
+        # Output mode toggle
+        ctk.CTkLabel(self._md_step2, text="Output mode:", anchor="w").grid(
             row=2, column=0, padx=(10, 4), pady=6, sticky="w")
+        mode_frame = ctk.CTkFrame(self._md_step2, fg_color="transparent")
+        mode_frame.grid(row=2, column=1, padx=4, pady=6, sticky="w")
+        self._md_split_var = tk.BooleanVar(value=True)   # default: multiple files
+        self._md_split_var.trace_add("write", self._on_md_split_changed)
+        ctk.CTkRadioButton(mode_frame, text="Single .md file",
+                           variable=self._md_split_var, value=False,
+                           state="disabled").pack(side="left")
+        ctk.CTkRadioButton(mode_frame, text="Multiple files by topic",
+                           variable=self._md_split_var, value=True,
+                           state="disabled").pack(side="left", padx=16)
+        # Keep references so we can enable/disable them
+        self._md_mode_frame = mode_frame
+
+        # Dynamic output label + field (switches between file and folder)
+        self._md_output_label = ctk.CTkLabel(self._md_step2, text="Output folder:", anchor="w")
+        self._md_output_label.grid(row=3, column=0, padx=(10, 4), pady=6, sticky="w")
         out_frame = ctk.CTkFrame(self._md_step2, fg_color="transparent")
-        out_frame.grid(row=2, column=1, padx=4, pady=6, sticky="ew")
+        out_frame.grid(row=3, column=1, padx=4, pady=6, sticky="ew")
         out_frame.columnconfigure(0, weight=1)
         self._md_outdir_var = tk.StringVar()
         self._md_outdir_entry = ctk.CTkEntry(
@@ -311,20 +328,11 @@ class App(ctk.CTk):
         self._md_crawl_btn.grid(row=row, column=0, columnspan=2, pady=12)
 
     def _on_md_url_changed(self, *_):
-        from .utils import url_to_filename, normalise_url
         url = self._md_url_var.get().strip()
         if not url:
             self._md_outdir_var.set("")
-            return
-        if not url.startswith("http"):
-            url = "https://" + url
-        try:
-            suggested = url_to_filename(normalise_url(url)) + "_md"
-        except Exception:
-            suggested = ""
-        current = self._md_outdir_var.get()
-        if not current or ("/" not in current and "\\" not in current):
-            self._md_outdir_var.set(suggested)
+        else:
+            self._update_md_output_suggestion()
         # Reset estimate label and button if the URL changes after an estimate
         self._md_estimate_label.configure(text="", text_color=("gray40", "gray70"))
         self._md_estimate_btn.configure(text="Estimate site size")
@@ -365,11 +373,50 @@ class App(ctk.CTk):
         self._run_in_thread(_run, self._md_estimate_btn, "Estimate site size",
                             clear_log=True, on_done=_after)
 
+    def _on_md_split_changed(self, *_):
+        """Switch the output field label and browse dialog between file and folder."""
+        if self._md_split_var.get():
+            self._md_output_label.configure(text="Output folder:")
+            self._md_browse_btn.configure(command=self._browse_md_outdir)
+        else:
+            self._md_output_label.configure(text="Output file:")
+            self._md_browse_btn.configure(command=self._browse_md_file_save)
+        self._md_outdir_var.set("")   # clear stale suggestion when mode changes
+        self._update_md_output_suggestion()
+
+    def _update_md_output_suggestion(self):
+        """Re-suggest output path based on current URL and split mode."""
+        from .utils import url_to_filename, normalise_url
+        url = self._md_url_var.get().strip()
+        if not url:
+            return
+        if not url.startswith("http"):
+            url = "https://" + url
+        try:
+            stem = url_to_filename(normalise_url(url))
+            suggested = stem + ("_md" if self._md_split_var.get() else ".md")
+        except Exception:
+            return
+        self._md_outdir_var.set(suggested)
+
+    def _browse_md_file_save(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            filetypes=[("Markdown files", "*.md"), ("All files", "*.*")],
+            title="Save Markdown as…",
+        )
+        if path:
+            self._md_outdir_var.set(path)
+
     def _set_md_step2_state(self, state: str):
         self._md_depth_menu.configure(state=state)
+        for widget in self._md_mode_frame.winfo_children():
+            widget.configure(state=state)
         self._md_outdir_entry.configure(state=state)
         self._md_browse_btn.configure(state=state)
         self._md_crawl_btn.configure(state=state)
+        if state == "normal":
+            self._update_md_output_suggestion()
 
     def _start_md_crawl(self):
         url = self._md_url_var.get().strip()
@@ -378,15 +425,14 @@ class App(ctk.CTk):
 
         depth_str = self._md_depth_var.get()
         depth_arg = None if depth_str == "Unlimited" else int(depth_str)
-        output_dir = self._md_outdir_var.get().strip() or None
+        output_path = self._md_outdir_var.get().strip() or None
+        split = self._md_split_var.get()
 
         def _run():
             from .crawler import crawl
-            from .md_writer import write_markdown_dir
             from .utils import normalise_url, url_to_filename
 
             start_url = normalise_url(url)
-            out_dir = output_dir or (url_to_filename(start_url) + "_md")
 
             print(f"Crawling {start_url} …")
             pages = crawl(start_url, max_depth=depth_arg, delay=0.5)
@@ -394,8 +440,17 @@ class App(ctk.CTk):
                 print("No pages could be crawled.")
                 return
             print(f"  Done — {len(pages)} page(s) crawled.")
-            print(f"\nWriting Markdown files → {out_dir}/")
-            write_markdown_dir(pages, start_url=start_url, output_dir=out_dir)
+
+            if split:
+                from .md_writer import write_markdown_dir
+                out_dir = output_path or (url_to_filename(start_url) + "_md")
+                print(f"\nWriting Markdown files → {out_dir}/")
+                write_markdown_dir(pages, start_url=start_url, output_dir=out_dir)
+            else:
+                from .md_writer import write_single_markdown
+                out_file = output_path or (url_to_filename(start_url) + ".md")
+                print(f"\nWriting Markdown → {out_file}")
+                write_single_markdown(pages, start_url=start_url, output_path=out_file)
             print("✓  Complete.")
 
         self._run_in_thread(_run, self._md_crawl_btn, "▶  Crawl to Markdown")
