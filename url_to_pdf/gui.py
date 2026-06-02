@@ -617,14 +617,22 @@ class App(ctk.CTk):
         pdf_path = self._pdf_input_var.get().strip()
         if not pdf_path:
             self._md_output_var.set("")
+            self._split_dir_var.set("")
             return
         try:
-            suggested = str(Path(pdf_path).with_suffix(".md"))
+            p = Path(pdf_path)
+            suggested_md = str(p.with_suffix(".md"))
+            suggested_dir = str(p.parent / p.stem)  # e.g. my_doc/ next to my_doc.pdf
         except Exception:
             return
-        current = self._md_output_var.get()
-        if not current or current.endswith(".md") and current == str(Path(current)):
-            self._md_output_var.set(suggested)
+        # Single-file output suggestion
+        current_md = self._md_output_var.get()
+        if not current_md or (current_md.endswith(".md") and current_md == str(Path(current_md))):
+            self._md_output_var.set(suggested_md)
+        # Split-dir suggestion
+        current_dir = self._split_dir_var.get()
+        if not current_dir or current_dir == str(Path(current_dir)):
+            self._split_dir_var.set(suggested_dir)
 
     # ------------------------------------------------------------------
     # Step 1: Run estimate
