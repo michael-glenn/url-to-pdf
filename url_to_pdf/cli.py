@@ -91,6 +91,15 @@ def main(argv: list[str] | None = None) -> None:
              "and reflow paragraphs for optimal LLM ingestion",
     )
     parser.add_argument(
+        "--split",
+        metavar="DIR",
+        nargs="?",
+        const="",          # flag present but no value -> auto-generate dir name
+        help="When used with --to-md: split output into topic-grouped .md files "
+             "in DIR (auto-named from the PDF if omitted) instead of a single file. "
+             "Produces one .md per topic section plus an index.md.",
+    )
+    parser.add_argument(
         "--group-depth",
         type=int,
         default=1,
@@ -170,8 +179,14 @@ def main(argv: list[str] | None = None) -> None:
     # Mode: PDF → Markdown conversion
     # ------------------------------------------------------------------
     if args.to_md:
-        from .pdf_converter import pdf_to_markdown
-        pdf_to_markdown(args.to_md, output_path=args.output, clean=args.clean)
+        if args.split is not None:
+            # Split into topic-grouped files in a directory
+            from .pdf_converter import pdf_to_markdown_dir
+            out_dir = args.split or args.output or None
+            pdf_to_markdown_dir(args.to_md, output_dir=out_dir, clean=args.clean)
+        else:
+            from .pdf_converter import pdf_to_markdown
+            pdf_to_markdown(args.to_md, output_path=args.output, clean=args.clean)
         return
 
     # ------------------------------------------------------------------

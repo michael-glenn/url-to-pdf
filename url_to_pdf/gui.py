@@ -428,6 +428,40 @@ class App(ctk.CTk):
                       command=self._browse_md_save).grid(row=0, column=1)
         row += 1
 
+        # Output mode — single file or split by topic
+        ctk.CTkLabel(parent, text="Output mode:", anchor="w").grid(
+            row=row, column=0, padx=(8, 4), pady=6, sticky="w")
+        mode_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        mode_frame.grid(row=row, column=1, padx=4, pady=6, sticky="w")
+        self._split_var = tk.BooleanVar(value=False)
+        self._split_var.trace_add("write", self._on_split_changed)
+        ctk.CTkRadioButton(mode_frame, text="Single .md file",
+                           variable=self._split_var, value=False).pack(side="left")
+        ctk.CTkRadioButton(mode_frame, text="Multiple files by topic",
+                           variable=self._split_var, value=True).pack(side="left", padx=16)
+        row += 1
+
+        # Split output directory (visible only when split mode is on)
+        self._split_dir_label = ctk.CTkLabel(parent, text="Output folder:", anchor="w")
+        self._split_dir_label.grid(row=row, column=0, padx=(8, 4), pady=6, sticky="w")
+        split_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        split_frame.grid(row=row, column=1, padx=4, pady=6, sticky="ew")
+        split_frame.columnconfigure(0, weight=1)
+        self._split_dir_var = tk.StringVar()
+        self._split_dir_entry = ctk.CTkEntry(
+            split_frame, textvariable=self._split_dir_var,
+            placeholder_text="(auto-named from PDF)")
+        self._split_dir_entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self._split_browse_btn = ctk.CTkButton(
+            split_frame, text="Browse…", width=80,
+            command=self._browse_split_dir)
+        self._split_browse_btn.grid(row=0, column=1)
+        # Hide split dir row initially
+        self._split_dir_label.grid_remove()
+        split_frame.grid_remove()
+        self._split_dir_frame = split_frame
+        row += 1
+
         ctk.CTkLabel(parent, text="Options:", anchor="w").grid(
             row=row, column=0, padx=(8, 4), pady=6, sticky="w")
         self._clean_var = tk.BooleanVar(value=False)
@@ -444,6 +478,21 @@ class App(ctk.CTk):
             command=self._start_convert,
         )
         self._convert_btn.grid(row=row, column=0, columnspan=2, pady=14)
+
+    def _on_split_changed(self, *_):
+        if self._split_var.get():
+            self._split_dir_label.grid()
+            self._split_dir_frame.grid()
+            # Hide the single-file output row label/entry
+            self._md_output_var.set("")
+        else:
+            self._split_dir_label.grid_remove()
+            self._split_dir_frame.grid_remove()
+
+    def _browse_split_dir(self):
+        path = filedialog.askdirectory(title="Select output folder")
+        if path:
+            self._split_dir_var.set(path)
 
     # ------------------------------------------------------------------
     # File dialogs
@@ -686,13 +735,23 @@ class App(ctk.CTk):
             self._log("⚠  Please select a PDF file.")
             return
 
-        md_path = self._md_output_var.get().strip() or None
         clean = self._clean_var.get()
+        split = self._split_var.get()
 
-        def _run():
-            from .pdf_converter import pdf_to_markdown
-            pdf_to_markdown(pdf_path, output_path=md_path, clean=clean)
-            print("✓  Complete.")
+        if split:
+            out_dir = self._split_dir_var.get().strip() or None
+
+            def _run():
+                from .pdf_converter import pdf_to_markdown_dir
+                pdf_to_markdown_dir(pdf_path, output_dir=out_dir, clean=clean)
+                print("✓  Complete.")
+        else:
+            md_path = self._md_output_var.get().strip() or None
+
+            def _run():
+                from .pdf_converter import pdf_to_markdown
+                pdf_to_markdown(pdf_path, output_path=md_path, clean=clean)
+                print("✓  Complete.")
 
         self._run_in_thread(_run, self._convert_btn, "▶  Convert to Markdown")
 
